@@ -5,7 +5,7 @@
 #define pi 3.14159265
 
 double logb2(int x);
-void fft(double *data, int left, int right, int N, double *X_real, double *X_imag);
+void fft(double *data, int N, int left, int right, double *X_real, double *X_imag, int sampNum, int *cont);
 
 
 typedef struct chunkInfo{
@@ -74,6 +74,7 @@ int main(int argc, char *argv[]){
             //Decoding the samples
             int dChunk = dataChunk/2;
             int finalSize = 0;
+            double *sinusoids = (double *)malloc(sizeof(double)*2);
             double *muestras;
             double *X_real, *X_imag;
             int numBits = 0;
@@ -81,46 +82,42 @@ int main(int argc, char *argv[]){
                 numBits = ceil(logb2(dataChunk));
                 finalSize = pow(2, numBits);
                 muestras = (double*)malloc(sizeof(double)*finalSize);
+                X_real = (double*)malloc(sizeof(double)*finalSize);
+                X_imag = (double*)malloc(sizeof(double)*finalSize);
                 for(int i=0; i<finalSize; i++){
                     if(i < dataChunk) muestras[i] = (data.data[i]-128)/128.0;
-                    else muestras[i] = 0.0;
+                    else muestras[i] = 0;
                 }
             }
             else{
                 numBits = ceil(logb2(dChunk));
                 finalSize = pow(2, numBits);
                 muestras = (double*)malloc(sizeof(double)*finalSize);
-                for(int i=0, b=0; i<finalSize; i++, b+=2){
-                    if(i < dChunk)
+                X_real = (double*)malloc(sizeof(double)*finalSize);
+                X_imag = (double*)malloc(sizeof(double)*finalSize);
+                for(int i=0, b=0; i<finalSize || b < dataChunk; i++, b+=2){
+                    if(i < dataChunk)
                         muestras[i] = ((unsigned char)data.dataS[b] | data.dataS[b+1]<<8)/32767.0;
                     else
-                        muestras[i] = 0.0;
+                        muestras[i] = 0;
                 }
             }
             
             //Bit reversal
-            int checkList[finalSize];
-            for(int i=0; i<finalSize; i++)
-                checkList[i] = -1;
-            for(int j=0; j<finalSize; j++){ 
+            for(int j=0; j<finalSize/2-1; j++){ 
                 unsigned int reverse = 0; 
-                if(checkList[j] == -1){
-                    for(int i=0; i<numBits; i++){
-                        if((j & (1<<i))) 
-                            reverse |= 1<<((numBits-1)-i);   
-                    }
-                    double temp = muestras[j];
-                    muestras[j] = muestras[reverse];
-                    muestras[reverse] = temp;
-                    checkList[j] = 1; checkList[reverse] = 1;
-                }
-            }
+                for(int i=0; i<numBits; i++){
+                    if((j & (1<<i))) 
+                        reverse |= 1<<((numBits-1)-i);   
+                } 
+                double temp = muestras[j];
+                muestras[j] = muestras[reverse];
+                muestras[reverse] = temp;  
+            } 
             
-            //FFT
-            X_real = (double*)malloc(sizeof(double)*finalSize);
-            X_imag = (double*)malloc(sizeof(double)*finalSize);
-            fft(muestras, 0, finalSize-1, finalSize, X_real, X_imag);
-    
+            int cont = 0;
+            fft(muestras, finalSize, 0, finalSize-1, X_real, X_imag, finalSize, &cont);
+            
             short numChannels = 2;
             int sampRate = *info.sampler;
             short blockAlign = numChannels*(bitPer/8);
@@ -151,6 +148,7 @@ int main(int argc, char *argv[]){
             fwrite(data.chunkSize, sizeof(int), 1, salida);
             if(bitPer == 8){
                 for(int i=0; i<finalSize; i++){
+                    if(i<200) printf("%d: %d\n", i, (X_imag[i]*128/finalSize)+128);
                     fputc((unsigned char)(X_real[i]*128/finalSize)+128, salida);
                     fputc((unsigned char)(X_imag[i]*128/finalSize)+128, salida);
                 }
@@ -185,41 +183,44 @@ double logb2(int x){
     return log(x)/log(2);
 }
 
-void fft(double *data, int left, int right, int N, double *X_real, double *X_imag){
+void fft(double *data, int N, int left, int right, double *X_real, double *X_imag, int sampNum, int *cont){
     if(N > 2){
-        fft(data, left, N/2-1+left, N/2, X_real, X_imag);
-        fft(data, N/2+left, right, N/2, X_real, X_imag);
+        fft(data, N/2, left, N/2-1, X_real, X_imag, sampNum, cont);
+        fft(data, N/2, N/2, right, X_real, X_imag, sampNum, cont);
+        int tam = right-left;
         double angle;
         double real_sinusoid;
         double imag_sinusoid;
-        for(int i=left, iSecHalf=i+N/2, k=0; k<N/2; i++, iSecHalf++, k++){
-            angle = (2*pi*k)/N;
+        for(int i=left; i<N/2+left; i++){
+            int iSecHalf = i+N/2;
+            angle = (2*pi*i)/sampNum;
             real_sinusoid = cos(angle);
-            imag_sinusoid = -sin(angle);
+            imag_sinusoid = (-sin(angle));
             double auxReal = X_real[i];
             double auxImag = X_imag[i];
             X_real[i] = X_real[i] + X_real[iSecHalf]*real_sinusoid;
             X_imag[i] = X_imag[i] + X_imag[iSecHalf]*imag_sinusoid;
+            angle = (2*pi*iSecHalf)/sampNum;
+            real_sinusoid = cos(angle);
+            imag_sinusoid = (-sin(angle));
             X_real[iSecHalf] = auxReal - X_real[iSecHalf]*real_sinusoid;
             X_imag[iSecHalf] = auxImag - X_imag[iSecHalf]*imag_sinusoid;
         }
     }
     else{
-        //Sinusoid
-        int k=0;
-        double angle = (2*pi*k)/N;
+        //Sinusoids for first half
+        double angle = (2*pi*left)/sampNum;
         double real_sinusoid = cos(angle);
-        double imag_sinusoid = -sin(angle);
-        //New left
+        double imag_sinusoid = (-sin(angle));
+        //Adding both DFT's 
         X_real[left] = data[left] + data[right]*real_sinusoid;
         X_imag[left] = data[left] + data[right]*imag_sinusoid;
-        //New right
+        //Sinusoids for second half
+        angle = (2*pi*right)/sampNum; 
+        real_sinusoid = cos(angle);
+        imag_sinusoid = (-sin(angle));
+        //Adding both DFT's 
         X_real[right] = data[left] - data[right]*real_sinusoid;
         X_imag[right] = data[left] - data[right]*imag_sinusoid;
     }
 }
-
-
-
-
-
