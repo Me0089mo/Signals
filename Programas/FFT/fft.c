@@ -152,6 +152,7 @@ int main(int argc, char *argv[]){
             if(bitPer == 8){
                 for(int i=0; i<finalSize; i++){
                     fputc((unsigned char)(X_real[i]*128/finalSize)+128, salida);
+                    if(i<100) printf("%d: %.6f, %x\n", i, X_real[i], (unsigned char)(X_real[i]*128/finalSize)+128);
                     fputc((unsigned char)(X_imag[i]*128/finalSize)+128, salida);
                 }
             }

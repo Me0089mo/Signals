@@ -134,6 +134,7 @@ int main(int argc, char *argv[]){
       if(bitPer == 8){
         for(int i=0; i<dataChunk; i++){
           fputc((unsigned char)(X_real[i]*128/dataChunk)+128, salida);
+          if(i<200) printf("%d: %x\n", i, (unsigned char)(X_real[i]*128/dataChunk)+128);
           fputc((unsigned char)(X_imag[i]*128/dataChunk)+128, salida);
         }
       }
